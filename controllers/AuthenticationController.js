@@ -62,8 +62,8 @@ async login(req, res) {
       });
     }
    
-  
- console.log("User found:", req.session.user);
+  console.log("Leader found:", leader);
+
     // Réponse à renvoyer côté frontend
     const newUser = {
       id: leader.id,
