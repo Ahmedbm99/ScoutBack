@@ -14,22 +14,13 @@ require("dotenv").config();
 const server = express();
 
 // 1. CORS CONFIG
-server.use(cors({
-  origin: (origin, callback) => callback(null, origin),
-  credentials: true
-}));
+server.use((req, res, next) => {
+	res.setHeader('Access-Control-Allow-Origin', 'https://scout-front-wheat.vercel.app'); // Replace with your client's origin
+	res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+	res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+	next();
+  });
 
-// 2. SESSION CONFIG
-server.use(session({
-  secret: "applicationScoutTresSevere", // change this!
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false, // true only in production with HTTPS
-    httpOnly: true,
-   
-  }
-}));
 
 // 3. AUTRES MIDDLEWARES
 server.use(morgan("combined"));
