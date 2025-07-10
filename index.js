@@ -20,7 +20,7 @@ server.use((req, res, next) => {
 	res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 	next();
   });
-server.options('*', cors());
+
 
 // 3. AUTRES MIDDLEWARES
 server.use(morgan("combined"));
