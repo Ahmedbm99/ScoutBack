@@ -1,13 +1,16 @@
 const { UserTask, User, Task, Leader } = require('../models');
 
 module.exports = {
-  // Récupérer toutes les tâches cochées par un utilisateur
+  // Récupérer toutes les tâches cochées (soumis/approuvées) par un leader/utilisateur
   async getUserTasks(req, res) {
-    const userId = req.params.userId;
+    const leaderId = req.params.leaderId || req.params.userId;
+    if (!leaderId) return res.status(400).json({ error: "ID utilisateur manquant" });
+
     try {
       const userTasks = await UserTask.findAll({
-        where: { UserId: userId },
+        where: { LeaderId: leaderId },
         include: [{ model: Task }],
+        order: [['createdAt', 'DESC']],
       });
       res.json(userTasks);
     } catch (error) {
@@ -16,24 +19,24 @@ module.exports = {
     }
   },
 
-  // Ajouter une tâche cochée pour un utilisateur et incrémenter progression
+  // Ajouter une tâche cochée pour un utilisateur + incrémenter progression
   async addUserTask(req, res) {
-    const { UserId, TaskId } = req.body;
+    const { LeaderId, TaskId } = req.body;
+    if (!LeaderId || !TaskId) return res.status(400).json({ error: "Paramètres manquants" });
+
     try {
-      // Vérifier si la relation existe déjà (éviter doublons)
-      const exists = await UserTask.findOne({ where: { UserId, TaskId } });
+      const exists = await UserTask.findOne({ where: { LeaderId, TaskId } });
       if (exists) {
         return res.status(400).json({ error: "Tâche déjà cochée" });
       }
 
-      await UserTask.create({ UserId, TaskId });
+      await UserTask.create({ LeaderId, TaskId, approved: false });
 
-      // Incrémenter progression utilisateur
-      const user = await User.findByPk(UserId);
-      if (user) {
-        // Logique d'incrémentation (ici +1, à adapter selon ton modèle)
-        user.progression = (user.progression ?? 0) + 1;
-        await user.save();
+      // Incrémenter progression utilisateur (optionnel ici selon ta logique)
+      const leader = await Leader.findByPk(LeaderId);
+      if (leader) {
+        leader.progression = (leader.progression ?? 0) + 1;
+        await leader.save();
       }
 
       res.status(201).json({ message: "Tâche cochée et progression mise à jour" });
@@ -43,22 +46,19 @@ module.exports = {
     }
   },
 
-  // Supprimer une tâche cochée et décrémenter progression
+  // Supprimer une tâche cochée + décrémenter progression
   async deleteUserTask(req, res) {
-    const { userId, taskId } = req.params;
-    try {
-      const deletedCount = await UserTask.destroy({
-        where: { UserId: userId, TaskId: taskId },
-      });
-      if (deletedCount === 0) {
-        return res.status(404).json({ error: "Association non trouvée" });
-      }
+    const { leaderId, taskId } = req.params;
+    if (!leaderId || !taskId) return res.status(400).json({ error: "Paramètres manquants" });
 
-      // Décrémenter progression utilisateur
-      const user = await User.findByPk(userId);
-      if (user) {
-        user.progression = Math.max((user.progression ?? 0) - 1, 0);
-        await user.save();
+    try {
+      const deleted = await UserTask.destroy({ where: { LeaderId: leaderId, TaskId: taskId } });
+      if (!deleted) return res.status(404).json({ error: "Tâche non trouvée" });
+
+      const leader = await Leader.findByPk(leaderId);
+      if (leader) {
+        leader.progression = Math.max((leader.progression ?? 0) - 1, 0);
+        await leader.save();
       }
 
       res.status(204).send();
@@ -68,147 +68,92 @@ module.exports = {
     }
   },
 
-// Ajouter une tâche cochée à plusieurs utilisateurs
-async addUserTaskToMultipleUsers(req, res) {
-  const { userIds, TaskId } = req.body; // userIds = array of user IDs
-  try {
+  // Ajouter une tâche cochée à plusieurs utilisateurs (bulk)
+  async addUserTaskToMultipleUsers(req, res) {
+    const { userIds, TaskId } = req.body;
     if (!Array.isArray(userIds) || !TaskId) {
       return res.status(400).json({ error: "Paramètres invalides" });
     }
 
-    // Préparer les entrées à créer, en évitant les doublons existants
-    const existingUserTasks = await UserTask.findAll({
-      where: { LeaderId: userIds, TaskId }
-    });
+    try {
+      // Trouver les UserTasks existants pour éviter doublons
+      const existingUserTasks = await UserTask.findAll({
+        where: { LeaderId: userIds, TaskId }
+      });
+      const existingUserIds = existingUserTasks.map(ut => ut.LeaderId);
 
-    const existingUserIds = existingUserTasks.map(ut => ut.UserId);
+      const toCreate = userIds
+        .filter(id => !existingUserIds.includes(id))
+        .map(id => ({ LeaderId: id, TaskId, approved: false }));
 
-    const toCreate = userIds
-      .filter(id => !existingUserIds.includes(id))
-      .map(id => ({ LeaderId: id, TaskId }));
+      const created = await UserTask.bulkCreate(toCreate);
 
-    const created = await UserTask.bulkCreate(toCreate);
-    for (const id of toCreate.map(u => u.LeaderId)) {
-      await Leader.increment('progression', { by: 1, where: { id } });
+      // Incrémenter la progression des leaders concernés
+      for (const id of toCreate.map(u => u.LeaderId)) {
+        await Leader.increment('progression', { by: 1, where: { id } });
+      }
+
+      res.status(201).json(created);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Erreur serveur" });
     }
-    res.status(201).json(created);
+  },
+
+  // Approuver ou refuser une tâche avec note
+  async approbation (req, res) {
+ try {
+    const { id } = req.params;
+    const { approved, note } = req.body;
+
+    const userTask = await UserTask.findByPk(id);
+    if (!userTask) return res.status(404).json({ message: "Tâche non trouvée" });
+
+    userTask.approved = approved;     // true ou false
+    userTask.note = note;   
+   
+    const leader = await Leader.findByPk(userTask.LeaderId);
+        if (leader) {
+          leader.progression = (leader.progression ?? 0) + note;
+          await leader.save();
+        }
+    await userTask.save();
+
+    return res.json({ message: "Tâche mise à jour avec succès", userTask });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Erreur serveur" });
+    return res.status(500).json({ message: "Erreur serveur" });
   }
 },
 
- async deleteUserTask(req, res) {
-    const { leaderId, taskId } = req.params;
-    try {
-      const deleted = await UserTask.destroy({
-        where: { LeaderId: leaderId, TaskId: taskId }
-      });
-
-      if (!deleted) {
-        return res.status(404).json({ error: "Aucune tâche trouvée" });
-      }
-
-      const leader = await Leader.findByPk(leaderId);
-      if (leader) {
-        leader.progression = Math.max((leader.progression ?? 0) - 1, 0);
-        await leader.save();
-      }
-
-      res.status(204).send();
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Erreur serveur" });
-    }
-  },
-
-   async approveTask(req, res) {
-    const { userTaskId } = req.params;
-    const { approved, note } = req.body; // note ∈ [0, 5]
-
-    try {
-      const userTask = await UserTask.findByPk(userTaskId);
-      if (!userTask) {
-        return res.status(404).json({ error: "UserTask introuvable" });
-      }
-
-      userTask.approved = approved;
-      if (approved) {
-        userTask.note = note;
-        const leader = await Leader.findByPk(userTask.LeaderId);
-        if (leader) {
-          leader.progression = (leader.progression ?? 0) + 1;
-          await leader.save();
-        }
-      }
-
-      await userTask.save();
-      res.json({ message: approved ? "Tâche approuvée" : "Tâche refusée" });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Erreur serveur" });
-    }
-  },
-
-    async getPendingTasks(req, res) {
+  // Récupérer les tâches en attente d'approbation
+  async getPendingTasks(req, res) {
     try {
       const pendingTasks = await UserTask.findAll({
         where: { approved: false },
         include: [{ model: Leader }, { model: Task }],
         attributes: ['id', 'justificationComment', 'justificationMedia', 'note', 'approved', 'LeaderId', 'TaskId']
-
       });
-
       res.json(pendingTasks);
-    } catch (err) {
-      console.error(err);
+    } catch (error) {
+      console.error(error);
       res.status(500).json({ error: "Erreur serveur" });
     }
   },
-    // Côté utilisateur : Soumettre une tâche accomplie avec justification
-  async submitTask(req, res) {
-    const { LeaderId, TaskId, justificationComment, justificationMedia } = req.body;
 
+  // Soumettre une tâche accomplie avec justification
+  async submitTaskWithJustification(req, res) {
     try {
+      const { LeaderId, TaskId, justificationComment } = req.body;
+      const justificationMedia = req.file ? req.file.filename : null;
+
       const exists = await UserTask.findOne({ where: { LeaderId, TaskId } });
       if (exists) {
         return res.status(400).json({ error: "Tâche déjà soumise" });
       }
 
-      await UserTask.create({
-        LeaderId,
-        TaskId,
-        justificationComment,
-        justificationMedia,
-        approved: false, // par défaut en attente
-      });
-
-      res.status(201).json({ message: "Tâche soumise avec justification" });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Erreur serveur" });
-    }
-  },
-    async getUserTasks(req, res) {
-    const leaderId = req.params.leaderId;
-    try {
-      const tasks = await UserTask.findAll({
-        where: { LeaderId: leaderId },
-        include: [{ model: Task }]
-      });
-      res.json(tasks);
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: "Erreur serveur" });
-    }
-  },
-  async submitTaskWithJustification(req, res) {
-    try {
-      const { UserId, TaskId, justificationComment } = req.body;
-      const justificationMedia = req.file ? req.file.filename : null;
-
       const newUserTask = await UserTask.create({
-        LeaderId: UserId,
+        LeaderId,
         TaskId,
         justificationComment,
         justificationMedia,
@@ -221,25 +166,8 @@ async addUserTaskToMultipleUsers(req, res) {
       res.status(500).json({ error: 'Erreur serveur lors de la soumission' });
     }
   },
- async approbation (req, res) {
- try {
-    const { id } = req.params;
-    const { approved, note } = req.body;
 
-    const userTask = await UserTask.findByPk(id);
-    if (!userTask) return res.status(404).json({ message: "Tâche non trouvée" });
-
-    userTask.approved = approved;     // true ou false
-    userTask.note = note;              // note sur 5
-    await userTask.save();
-
-    return res.json({ message: "Tâche mise à jour avec succès", userTask });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Erreur serveur" });
-  }
-},
-async getUsersProgressions(req, res) {
+ async getUsersProgressions(req, res) {
   const userIds = req.params.ids?.split(',').map(Number);
 
   if (!userIds || userIds.length === 0) {
@@ -249,37 +177,67 @@ async getUsersProgressions(req, res) {
   try {
     const usersData = await Promise.all(
       userIds.map(async (userId) => {
-        const user = await Leader.findByPk(userId);
+        // Récupérer l'utilisateur avec son superviseur inclus
+        const user = await Leader.findByPk(userId, {
+          include: [{ model: Leader, as: 'Supervisor', attributes: ['username'] }]
+        });
         if (!user) return null;
 
-        // Total tâches disponibles (global)
-        const totalTasks = await Task.count();
-
-        // Tâches accomplies ET approuvées par cet utilisateur
+        // Récupérer les tâches accomplies et approuvées par cet utilisateur
         const userTasks = await UserTask.findAll({
           where: { LeaderId: userId, approved: true },
-          include: [{ model: Task }]
+          include: [{ model: Task, attributes: ['id', 'description'] }],
         });
-const totalNote = userTasks.reduce((acc, ut) => acc + (ut.note ?? 0), 0);
-const maxNote = 9 * 5; // 9 tâches max * note max 5
-const progression = totalNote / maxNote;
 
- 
+        // Somme des notes (progression)
+        const progression = userTasks.reduce((sum, ut) => sum + (ut.note ?? 0), 0);
 
         return {
           id: user.id,
           username: user.username,
-          progression: progression.toFixed(1),
+          supervisorUsername: user.Supervisor ? user.Supervisor.username : null,
+          progression,
           completedTasks: userTasks.map(ut => ({
             id: ut.Task.id,
             description: ut.Task.description,
-            
-          }))
+            note: ut.note ?? 0,
+            justificationComment: ut.justificationComment || '',
+          })),
         };
       })
     );
 
     res.json(usersData.filter(u => u !== null));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+},
+
+
+
+  async  getUserDoneTasks(req, res) {
+  const leaderId = req.params.leaderId;
+  try {
+    const doneTasks = await UserTask.findAll({
+      where: {
+        LeaderId: leaderId,
+        approved: true  // uniquement tâches approuvées / faites
+      },
+      attributes: ['id', 'note', 'approved','justificationComment' , 'justificationMedia'],
+      include: [{
+        model: Task,
+        attributes: ['id', 'description', 'number']
+      },
+     {
+          model: Leader, // inclure l'utilisateur/leader
+          attributes: ['id', 'username', 'supervisorId', 'progression'] // ajoute supervisorId ici
+        }
+    ],
+  
+    });
+
+    res.json(doneTasks);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Erreur serveur" });

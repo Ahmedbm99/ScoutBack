@@ -39,7 +39,7 @@ server.use(bodyParser.json());
 
 server.use("/public", express.static("public"));
 server.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
+require('./passport')
 // 4. ROUTES
 const routes = require("./routes");
 server.use("/api", routes);

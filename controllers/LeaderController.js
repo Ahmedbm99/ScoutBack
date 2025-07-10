@@ -1,10 +1,8 @@
-
-const { Leader,Task, UserTask } = require('../models')
-
+const { Leader, Task, UserTask } = require('../models');
 
 const getSupervisedUsers = async (req, res) => {
-  const supervisorId = req.session.user?.id;
-  console.log("ID du superviseur :", req.session);
+  const supervisorId = req.user?.id;
+  console.log("ID du superviseur :", supervisorId);
   if (!supervisorId) {
     return res.status(401).json({ message: "Utilisateur non authentifié" });
   }
@@ -25,21 +23,21 @@ const getSupervisedUsers = async (req, res) => {
   }
 };
 
-
 const getLeaderById = async (req, res) => {
-    try {
-        const leader = await Leader.findById(req.params.id);
-        if (!leader) return res.status(404).json({ message: 'Leader not found' });
-        res.json(leader);
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  try {
+    const leader = await Leader.findByPk(req.params.id);
+    if (!leader) return res.status(404).json({ message: 'Leader not found' });
+    res.json(leader);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
+
 const getSuperviseUsers = async (req, res) => {
   try {
     const supervisors = await Leader.findAll({
       where: {
-        role: "supervisuer" , // ou isSupervisor: true selon ta logique
+        role: "supervisor", // Vérifie l'orthographe
       },
       attributes: ["id", "username", "firstName", "lastName"] // ajuste les champs retournés
     });
@@ -49,11 +47,11 @@ const getSuperviseUsers = async (req, res) => {
     res.status(500).json({ message: "Erreur lors de la récupération des superviseurs" });
   }
 };
+
 const getAccomplishedTasksBySupervisor = async (req, res) => {
   try {
-    console.log("Session utilisateur :", req.session.user);
-    const supervisorId = req.session.user.supervisorId;
 
+    const supervisorId = req.user.id;
 
     if (!supervisorId) {
       return res.status(400).json({ message: "supervisorId est requis" });
@@ -66,7 +64,7 @@ const getAccomplishedTasksBySupervisor = async (req, res) => {
           model: Task,
           through: {
             model: UserTask,
-            attributes: ["note", "justificationComment","justificationMedia"], // Infos supplémentaires
+            attributes: ["note", "justificationComment", "justificationMedia"],
           },
         },
       ],
@@ -78,10 +76,12 @@ const getAccomplishedTasksBySupervisor = async (req, res) => {
     res.status(500).json({ error: "Erreur serveur" });
   }
 };
+
 const createSupervisorSelfSupervised = async (req, res) => {
   try {
     const { supervisorId, ...leaderData } = req.body;
 
+    leaderData.role = 'supervisor'; 
     // Création sans supervisorId
     const newLeader = await Leader.create({
       ...leaderData,
@@ -98,37 +98,38 @@ const createSupervisorSelfSupervised = async (req, res) => {
   }
 };
 
-
 const updateLeader = async (req, res) => {
-    try {
-        const updatedLeader = await Leader.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            { new: true }
-        );
-        if (!updatedLeader) return res.status(404).json({ message: 'Leader not found' });
-        res.json(updatedLeader);
-    } catch (err) {
-        res.status(400).json({ message: err.message });
-    }
+  try {
+    console.log("Payload updateLeader:", req.body);
+    const [updatedRowsCount, [updatedLeader]] = await Leader.update(req.body, {
+      where: { id: req.params.id },
+      returning: true,
+    });
+    if (updatedRowsCount === 0) return res.status(404).json({ message: 'Leader not found' });
+    res.json(updatedLeader);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
 };
 
 const deleteLeader = async (req, res) => {
-    try {
-        const deletedLeader = await Leader.findByIdAndDelete(req.params.id);
-        if (!deletedLeader) return res.status(404).json({ message: 'Leader not found' });
-        res.json({ message: 'Leader deleted' });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
+  try {
+    const deletedRowsCount = await Leader.destroy({
+      where: { id: req.params.id }
+    });
+    if (deletedRowsCount === 0) return res.status(404).json({ message: 'Leader not found' });
+    res.json({ message: 'Leader deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
 };
 
 module.exports = {
-    createSupervisorSelfSupervised,
-    getLeaderById,
-    getAccomplishedTasksBySupervisor,
-    updateLeader,
-    deleteLeader,
-    getSuperviseUsers,
-    getSupervisedUsers
+  createSupervisorSelfSupervised,
+  getLeaderById,
+  getAccomplishedTasksBySupervisor,
+  updateLeader,
+  deleteLeader,
+  getSuperviseUsers,
+  getSupervisedUsers
 };

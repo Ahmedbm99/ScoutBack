@@ -1,7 +1,14 @@
 const { Leader } = require('../models')
 
 const config = require('../config/config')
+const jwt = require('jsonwebtoken')
 
+function jwtSignUser(user) {
+    const ONE_DAY = 60 * 60 * 24 
+    return jwt.sign(user, config.authentication.jwtSecret, {
+        expiresIn: ONE_DAY
+    }) 
+}
 
 module.exports = {
 
@@ -21,8 +28,14 @@ module.exports = {
 
     async registerMember(req, res) {
         try {
-           
-            const leader = await Leader.create(req.body);
+           req.body.role = 'user'; // Assurez-vous que le rôle est défini pour les membres
+              if (req.body.supervisorId && typeof req.body.supervisorId === 'object') {
+      req.body.supervisorId = req.body.supervisorId.id;
+    }
+          console.log("Registering member with data:", req.body);
+
+           const leader = await Leader.create(req.body);
+  
      
             return res.send({ id: leader.id })
         } catch (err) {
@@ -49,15 +62,7 @@ async login(req, res) {
       });
     }
    
-    // Stocker l'utilisateur dans la session
-    req.session.user = {
-      id: leader.id,
-      username: leader.username,
-      isAdmin: leader.isAdmin,
-      progression: leader.progression,
-      role: leader.role,
-      supervisorId: leader.supervisorId,
-    };
+  
  console.log("User found:", req.session.user);
     // Réponse à renvoyer côté frontend
     const newUser = {
@@ -72,7 +77,7 @@ async login(req, res) {
       role: leader.role,
     };
 
-    res.send({ user: newUser });
+    res.send({ user: newUser ,token: jwtSignUser(newUser) });
 
   } catch (err) {
     res.status(500).send({
