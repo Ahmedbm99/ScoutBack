@@ -36,6 +36,7 @@ router.get('/user-tasks/done/:leaderId', UserTaskController.getUserDoneTasks);
 
 
 // ==== Leaders ====
+router.get('/scout/getAllScouts',isAuthenticated ,LeaderController.getAllScouts );
 router.get('/scout/getSupervisedUsers',isAuthenticated ,LeaderController.getSupervisedUsers );
 router.get('/scout/getSuperviseUsers',isAuthenticated ,LeaderController.getSuperviseUsers);
 router.post('/scout/addSupervisor' ,isAuthenticated,LeaderController.createSupervisorSelfSupervised);

@@ -23,6 +23,30 @@ const getSupervisedUsers = async (req, res) => {
   }
 };
 
+const getAllScouts = async (req, res) => {
+  try {
+    const scouts = await Leader.findAll({
+      where: { role: 'user' },
+      attributes: { exclude: ['password'] },
+      include: [
+        {
+          model: Task,
+          through: {
+            model: UserTask,
+            attributes: ['note', 'justificationComment', 'justificationMedia'],
+          },
+        },
+      ],
+    });
+
+    res.status(200).json(scouts);
+  } catch (err) {
+    console.error("Erreur dans getAllScouts:", err);
+    res.status(500).json({ error: 'Erreur serveur lors de la récupération des scouts' });
+  }
+};
+
+
 const getLeaderById = async (req, res) => {
   try {
     const leader = await Leader.findByPk(req.params.id);
@@ -127,6 +151,7 @@ const deleteLeader = async (req, res) => {
 module.exports = {
   createSupervisorSelfSupervised,
   getLeaderById,
+  getAllScouts,
   getAccomplishedTasksBySupervisor,
   updateLeader,
   deleteLeader,

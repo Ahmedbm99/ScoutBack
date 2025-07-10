@@ -1,6 +1,6 @@
 module.exports = {
     port: process.env.PORT || 10000,
-   db: {
+db: {
         database: process.env.DB_NAME || "scoutDatabase",
         user: process.env.DB_USER || "AhmedDali",
         password: process.env.DB_PASS || "@hmed2025",
@@ -9,6 +9,7 @@ module.exports = {
         port :1433
         
     }, 
+
 
     authentication: {
         jwtSecret : process.env.JWT_SECRET || 'secret'
